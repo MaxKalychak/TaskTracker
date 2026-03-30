@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func checkSite(link string, wg *sync.WaitGroup) {
+func checkSite(link string, wg *sync.WaitGroup, ch chan bool) {
 	defer wg.Done()
 	client := http.Client{
 		Timeout: 5 * time.Second,
@@ -19,6 +19,7 @@ func checkSite(link string, wg *sync.WaitGroup) {
 	resp, err := client.Get(link)
 	if err != nil {
 		fmt.Printf("%s - Error: %v\n", link, err)
+		ch <- false
 		return
 	}
 
@@ -26,6 +27,7 @@ func checkSite(link string, wg *sync.WaitGroup) {
 	fmt.Println("\nFound URL:", link)
 	fmt.Println("Status: ", resp.Status)
 	fmt.Println("Code: ", resp.StatusCode)
+	ch <- true
 }
 
 func readFile(filename string) {
@@ -38,6 +40,20 @@ func readFile(filename string) {
 	defer file.Close()
 
 	var wg sync.WaitGroup
+	result := make(chan bool)
+
+	total, alive, errors := 0, 0, 0
+
+	go func() {
+		for res := range result {
+			total++
+			if res == true {
+				alive++
+			} else {
+				errors++
+			}
+		}
+	}()
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -47,15 +63,22 @@ func readFile(filename string) {
 		}
 
 		wg.Add(1)
-		go checkSite(url, &wg)
+		go checkSite(url, &wg, result)
 	}
 
 	wg.Wait()
 
+	close(result)
+
+	time.Sleep(100 * time.Millisecond)
+
 	if err := scanner.Err(); err != nil {
 		fmt.Println("Error while reading file: ", err)
 	}
-
+	fmt.Println("\n--- Статистика перевірки ---")
+	fmt.Printf("Всього перевірено: %d\n", total)
+	fmt.Printf("Працюють:        %d\n", alive)
+	fmt.Printf("Помилок:         %d\n", errors)
 }
 
 func main() {
